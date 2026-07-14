@@ -12,9 +12,6 @@ Logic:
   - Same progress                                            → Skip
 
 Runs via GitHub Actions on a schedule (see sync_interval_days in config.json).
-
-All credentials come from config.json in this same directory. See README.md
-for how to fill it in (hand-edit it, or run the "Setup - Config" workflow).
 """
 
 import json
@@ -24,80 +21,57 @@ import time
 import requests
 from datetime import datetime
 
-BASE       = os.path.dirname(os.path.abspath(__file__))
-CONFIG_F   = os.path.join(BASE, "config.json")
-LOG_F      = os.path.join(BASE, "anilist_sync_log.txt")
-MAL_TOK    = os.path.join(BASE, "mal_token.json")
-AL_TOK     = os.path.join(BASE, "anilist_token.json")
-LAST_RUN   = os.path.join(BASE, "anilist_last_run.txt")
+BASE     = os.path.dirname(os.path.abspath(__file__))
+CONFIG_F = os.path.join(BASE, "config.json")
+LOG_F    = os.path.join(BASE, "anilist_sync_log.txt")
+MAL_TOK  = os.path.join(BASE, "mal_token.json")
+AL_TOK   = os.path.join(BASE, "anilist_token.json")
+LAST_RUN = os.path.join(BASE, "anilist_last_run.txt")
 
-REQUIRED_STRING_FIELDS = [
+REQUIRED_CONFIG_FIELDS = [
     "mal_client_id",
     "anilist_client_id",
     "anilist_client_secret",
     "mal_username",
 ]
 
-
-# ── CONFIG LOADING + VALIDATION ───────────────
+# ── CONFIG LOADING ───────────────────────
 def load_config():
-    """
-    Load config.json and validate it. Fails loudly with a clear, actionable
-    message (no stack trace) if anything required is missing — this is the
-    only "support channel" most users of this template will ever see.
-    """
     if not os.path.exists(CONFIG_F):
         print(
-            "ERROR: config.json not found.\n\n"
-            "This repo needs a config.json in its root directory with your\n"
-            "MAL and AniList credentials. See the README's 'Setup' section:\n"
-            "  1) Hand-edit config.json directly (in the GitHub web UI or locally), OR\n"
-            "  2) Run the 'Setup - Config' workflow from the Actions tab.\n"
+            "ERROR: config.json not found.\n"
+            "Create it from the template (see README.md) and fill in your "
+            "mal_client_id, anilist_client_id, anilist_client_secret, and "
+            "mal_username — either by hand-editing config.json or by running "
+            "the 'Setup - Config' workflow in the Actions tab."
         )
         sys.exit(1)
 
-    try:
-        with open(CONFIG_F, encoding="utf-8") as f:
-            config = json.load(f)
-    except (json.JSONDecodeError, OSError) as e:
-        print(
-            f"ERROR: config.json exists but could not be read/parsed ({e}).\n"
-            "Make sure it's valid JSON. See the README's 'Setup' section for the\n"
-            "expected format, or re-run the 'Setup - Config' workflow to regenerate it.\n"
-        )
-        sys.exit(1)
+    with open(CONFIG_F) as f:
+        try:
+            cfg = json.load(f)
+        except json.JSONDecodeError as e:
+            print(f"ERROR: config.json is not valid JSON: {e}")
+            sys.exit(1)
 
-    missing = [
-        field for field in REQUIRED_STRING_FIELDS
-        if not str(config.get(field, "")).strip()
-    ]
+    missing = [k for k in REQUIRED_CONFIG_FIELDS if not cfg.get(k)]
     if missing:
         print(
-            "ERROR: config.json is missing required values: "
-            + ", ".join(missing) + "\n\n"
-            "Fill these in before the sync can run. You can either:\n"
-            "  1) Hand-edit config.json directly (in the GitHub web UI or locally), OR\n"
-            "  2) Run the 'Setup - Config' workflow from the Actions tab to fill\n"
-            "     them in via a form.\n\n"
-            "See the README's 'Setup' section for where to get MAL/AniList\n"
-            "client IDs and secrets (you must register your own OAuth apps).\n"
+            "ERROR: config.json is missing values for: " + ", ".join(missing) + "\n"
+            "Fill these in either by hand-editing config.json or by running "
+            "the 'Setup - Config' workflow in the Actions tab (see README.md)."
         )
         sys.exit(1)
 
-    # sync_interval_days is optional-with-default, not part of the hard requirement
-    if "sync_interval_days" not in config:
-        config["sync_interval_days"] = 23
+    cfg.setdefault("sync_interval_days", 23)
+    return cfg
 
-    return config
-
-
-CONFIG                = load_config()
-MAL_CLIENT_ID          = CONFIG["mal_client_id"]
-ANILIST_CLIENT_ID      = CONFIG["anilist_client_id"]
-ANILIST_CLIENT_SECRET  = CONFIG["anilist_client_secret"]
+CONFIG = load_config()
+MAL_CLIENT_ID         = CONFIG["mal_client_id"]
+ANILIST_CLIENT_ID     = CONFIG["anilist_client_id"]
+ANILIST_CLIENT_SECRET = CONFIG["anilist_client_secret"]
 MAL_USERNAME           = CONFIG["mal_username"]
 SYNC_INTERVAL_DAYS     = CONFIG["sync_interval_days"]
-
 
 def log(msg):
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -128,7 +102,7 @@ def mark_ran_today():
     with open(LAST_RUN, "w") as f:
         f.write(datetime.now().strftime("%Y-%m-%d"))
 
-# ── MAL STATUS → ANILIST STATUS ───────────────
+# ── MAL STATUS → ANILIST STATUS ─────────────
 MAL_TO_AL_STATUS = {
     "watching":      "CURRENT",
     "reading":       "CURRENT",
@@ -139,10 +113,10 @@ MAL_TO_AL_STATUS = {
     "plan_to_read":  "PLANNING",
 }
 
-# ── MAL TOKEN ────────────────────────────────
+# ── MAL TOKEN ───────────────────
 def get_mal_token():
     if not os.path.exists(MAL_TOK):
-        log("ERROR: mal_token.json not found. Run the setup_mal workflow first.")
+        log("ERROR: mal_token.json not found. Run the setup workflow first.")
         return None
     with open(MAL_TOK) as f:
         td = json.load(f)
@@ -169,16 +143,16 @@ def get_mal_token():
     log("MAL token refreshed OK.")
     return td["access_token"]
 
-# ── ANILIST TOKEN ─────────────────────────────
+# ── ANILIST TOKEN ───────────────
 def get_anilist_token():
     if not os.path.exists(AL_TOK):
-        log("ERROR: anilist_token.json not found. Run the setup_anilist workflow first.")
+        log("ERROR: anilist_token.json not found. Run the setup workflow first.")
         return None
     with open(AL_TOK) as f:
         td = json.load(f)
     return td.get("access_token")
 
-# ── ANILIST REQUEST WITH RETRY ────────────────
+# ── ANILIST REQUEST WITH RETRY ────────────
 def anilist_request(payload, al_token, retries=3):
     """POST to AniList GraphQL with retry + backoff on connection errors."""
     for attempt in range(retries):
@@ -209,7 +183,7 @@ def anilist_request(payload, al_token, retries=3):
                 return None
     return None
 
-# ── FETCH MAL LIST ────────────────────────────
+# ── FETCH MAL LIST ────────────────
 def fetch_mal_list(media_type, token):
     entries = []
     offset  = 0
@@ -255,7 +229,7 @@ def fetch_mal_list(media_type, token):
 
     return entries
 
-# ── ANILIST: GET ENTRY BY MAL ID ──────────────
+# ── ANILIST: GET ENTRY BY MAL ID ──────
 def get_anilist_entry(mal_id, media_type, al_token):
     al_type = "ANIME" if media_type == "anime" else "MANGA"
     query = """
@@ -290,7 +264,7 @@ def get_anilist_entry(mal_id, media_type, al_token):
     else:
         return al_id, None, 0, 0  # in DB, not on user list
 
-# ── ANILIST: UPDATE / ADD ENTRY ─────────────
+# ── ANILIST: UPDATE / ADD ENTRY ─────────
 def update_anilist_entry(al_id, status, progress, score, al_token):
     mutation = """
     mutation ($mediaId: Int, $status: MediaListStatus, $progress: Int, $score: Float) {
@@ -318,7 +292,7 @@ def update_anilist_entry(al_id, status, progress, score, al_token):
         return False
     return r.status_code == 200
 
-# ── MAIN ──────────────────────────────────
+# ── MAIN ──────────────────
 def sync():
     days = days_since_last_run()
     if already_ran_recently():
