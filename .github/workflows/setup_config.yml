@@ -1,0 +1,80 @@
+name: Setup - Config
+
+# Fills in config.json via a form in the Actions tab, instead of hand-editing
+# the JSON file directly. Either approach works — this is just an alternative
+# for people who'd rather fill in fields than edit JSON.
+#
+# You still need to have registered your own MAL and AniList OAuth apps
+# first (see README.md) — this workflow just writes the 4 values you give it
+# into config.json and commits it. It preserves sync_interval_days if
+# config.json already exists, defaulting to 23 otherwise.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mal_client_id:
+        description: 'Your MAL API Client ID (from myanimelist.net/apiconfig)'
+        required: true
+      anilist_client_id:
+        description: 'Your AniList API Client ID (from anilist.co/settings/developer)'
+        required: true
+      anilist_client_secret:
+        description: 'Your AniList API Client Secret'
+        required: true
+      mal_username:
+        description: 'Your MyAnimeList username'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  setup-config:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Write config.json
+        env:
+          MAL_CLIENT_ID: ${{ github.event.inputs.mal_client_id }}
+          ANILIST_CLIENT_ID: ${{ github.event.inputs.anilist_client_id }}
+          ANILIST_CLIENT_SECRET: ${{ github.event.inputs.anilist_client_secret }}
+          MAL_USERNAME: ${{ github.event.inputs.mal_username }}
+        run: |
+          python3 - <<'EOF'
+          import json
+          import os
+
+          config_path = "config.json"
+          existing_interval = 23
+          if os.path.exists(config_path):
+              try:
+                  with open(config_path, encoding="utf-8") as f:
+                      existing = json.load(f)
+                  existing_interval = existing.get("sync_interval_days", 23)
+              except (json.JSONDecodeError, OSError):
+                  pass
+
+          config = {
+              "mal_client_id": os.environ["MAL_CLIENT_ID"].strip(),
+              "anilist_client_id": os.environ["ANILIST_CLIENT_ID"].strip(),
+              "anilist_client_secret": os.environ["ANILIST_CLIENT_SECRET"].strip(),
+              "mal_username": os.environ["MAL_USERNAME"].strip(),
+              "sync_interval_days": existing_interval,
+          }
+
+          with open(config_path, "w", encoding="utf-8") as f:
+              json.dump(config, f, indent=2)
+              f.write("\n")
+
+          print("config.json written.")
+          EOF
+
+      - name: Commit config.json
+        run: |
+          git config user.name "sync-bot"
+          git config user.email "sync-bot@users.noreply.github.com"
+          git add config.json
+          git diff --cached --quiet && echo "No changes to commit" || git commit -m "Configure MAL/AniList credentials"
+          git push

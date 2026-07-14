@@ -1,0 +1,44 @@
+name: Setup - MAL OAuth Token
+
+# Run this AFTER config.json has your mal_client_id filled in (via
+# hand-edit or the "Setup - Config" workflow). Two-step process — see
+# README.md for the full walkthrough.
+
+on:
+  workflow_dispatch:
+    inputs:
+      mal_redirect_url:
+        description: 'Leave empty for STEP 1 (get auth URL). Paste the full localhost redirect URL for STEP 2 (get token).'
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+
+jobs:
+  setup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Run MAL token setup
+        env:
+          MAL_REDIRECT_URL: ${{ github.event.inputs.mal_redirect_url }}
+        run: python setup_mal_token.py
+
+      - name: Commit token file
+        run: |
+          git config user.name "sync-bot"
+          git config user.email "sync-bot@users.noreply.github.com"
+          git add mal_token.json || true
+          git diff --cached --quiet && echo "No changes to commit" || git commit -m "MAL OAuth setup step"
+          git push

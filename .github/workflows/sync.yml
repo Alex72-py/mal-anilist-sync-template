@@ -1,0 +1,38 @@
+name: MAL to AniList Sync
+
+on:
+  schedule:
+    # Runs daily at 06:00 UTC. The script itself checks sync_interval_days
+    # (in config.json) and skips if it's not time yet — so this is just a
+    # "check-in" cadence, not the actual sync frequency.
+    - cron: '0 6 * * *'
+  workflow_dispatch: {}  # allows manual trigger from the Actions tab
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run sync
+        run: python mal_to_anilist.py
+
+      - name: Commit updated tokens and logs
+        run: |
+          git config user.name "sync-bot"
+          git config user.email "sync-bot@users.noreply.github.com"
+          git add mal_token.json anilist_token.json anilist_sync_log.txt anilist_last_run.txt
+          git diff --cached --quiet && echo "No changes to commit" || git commit -m "Sync run: $(date -u +'%Y-%m-%d %H:%M UTC')"
+          git push
