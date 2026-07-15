@@ -15,7 +15,7 @@ jobs:
   sync:
     # Skip on the template repository itself. Repos created via "Use this
     # template" always start with is_template = false, so this never
-    # affects real user repos — nothing for them to configure.
+    # affects real user repos — nothing to configure.
     if: github.event.repository.is_template == false
     runs-on: ubuntu-latest
     steps:
