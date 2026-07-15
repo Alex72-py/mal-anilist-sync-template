@@ -39,7 +39,7 @@ REQUIRED_STRING_FIELDS = [
 ]
 
 
-# ── CONFIG LOADING + VALIDATION ───────────────
+# ── CONFIG LOADING + VALIDATION ───────────────────────────
 def load_config():
     """
     Load config.json and validate it. Fails loudly with a clear, actionable
@@ -106,7 +106,7 @@ def log(msg):
     with open(LOG_F, "a", encoding="utf-8") as f:
         f.write(line + "\n")
 
-# ── INTERVAL CHECK (days-based, not calendar month) ───
+# ── INTERVAL CHECK (days-based, not calendar month) ───────
 def days_since_last_run():
     if not os.path.exists(LAST_RUN):
         return None
@@ -128,7 +128,7 @@ def mark_ran_today():
     with open(LAST_RUN, "w") as f:
         f.write(datetime.now().strftime("%Y-%m-%d"))
 
-# ── MAL STATUS → ANILIST STATUS ───────────────
+# ── MAL STATUS → ANILIST STATUS ───────────────────────────
 MAL_TO_AL_STATUS = {
     "watching":      "CURRENT",
     "reading":       "CURRENT",
@@ -139,7 +139,7 @@ MAL_TO_AL_STATUS = {
     "plan_to_read":  "PLANNING",
 }
 
-# ── MAL TOKEN ─────────────────────────────────
+# ── MAL TOKEN ─────────────────────────────────────────────
 def get_mal_token():
     if not os.path.exists(MAL_TOK):
         log("ERROR: mal_token.json not found. Run the setup_mal workflow first.")
@@ -169,7 +169,7 @@ def get_mal_token():
     log("MAL token refreshed OK.")
     return td["access_token"]
 
-# ── ANILIST TOKEN ─────────────────────────────
+# ── ANILIST TOKEN ─────────────────────────────────────────
 def get_anilist_token():
     if not os.path.exists(AL_TOK):
         log("ERROR: anilist_token.json not found. Run the setup_anilist workflow first.")
@@ -178,7 +178,7 @@ def get_anilist_token():
         td = json.load(f)
     return td.get("access_token")
 
-# ── ANILIST REQUEST WITH RETRY ────────────────
+# ── ANILIST REQUEST WITH RETRY ────────────────────────────
 def anilist_request(payload, al_token, retries=3):
     """POST to AniList GraphQL with retry + backoff on connection errors."""
     for attempt in range(retries):
@@ -209,7 +209,7 @@ def anilist_request(payload, al_token, retries=3):
                 return None
     return None
 
-# ── FETCH MAL LIST ─────────────────────────────
+# ── FETCH MAL LIST ────────────────────────────────────────
 def fetch_mal_list(media_type, token):
     entries = []
     offset  = 0
@@ -255,7 +255,7 @@ def fetch_mal_list(media_type, token):
 
     return entries
 
-# ── ANILIST: GET ENTRY BY MAL ID ──────────────
+# ── ANILIST: GET ENTRY BY MAL ID ──────────────────────────
 def get_anilist_entry(mal_id, media_type, al_token):
     al_type = "ANIME" if media_type == "anime" else "MANGA"
     query = """
@@ -290,7 +290,7 @@ def get_anilist_entry(mal_id, media_type, al_token):
     else:
         return al_id, None, 0, 0  # in DB, not on user list
 
-# ── ANILIST: UPDATE / ADD ENTRY ─────
+# ── ANILIST: UPDATE / ADD ENTRY ───────────────────────────
 def update_anilist_entry(al_id, status, progress, score, al_token):
     mutation = """
     mutation ($mediaId: Int, $status: MediaListStatus, $progress: Int, $score: Float) {
@@ -318,7 +318,7 @@ def update_anilist_entry(al_id, status, progress, score, al_token):
         return False
     return r.status_code == 200
 
-# ── MAIN ────────────────────────────────────────────────
+# ── MAIN ──────────────────────────────────────────────────
 def sync():
     days = days_since_last_run()
     if already_ran_recently():
