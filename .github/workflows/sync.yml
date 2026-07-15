@@ -6,17 +6,41 @@ on:
     # (in config.json) and skips if it's not time yet — so this is just a
     # "check-in" cadence, not the actual sync frequency.
     - cron: '0 6 * * *'
-  workflow_dispatch: {}  # allows manual trigger from the Actions tab
+  workflow_dispatch: {}   # allows manual trigger from the Actions tab
 
 permissions:
   contents: write
 
 jobs:
   sync:
+    # Skip on the template repository itself. Repos created via "Use this
+    # template" always start with is_template = false, so this never
+    # affects real user repos — nothing for them to configure.
+    if: github.event.repository.is_template == false
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
+
+      - name: Validate configuration
+        run: |
+          python3 - <<'EOF'
+          import json, sys
+
+          required = ["mal_client_id", "anilist_client_id", "anilist_client_secret", "mal_username"]
+          try:
+              with open("config.json", encoding="utf-8") as f:
+                  config = json.load(f)
+          except (OSError, json.JSONDecodeError) as e:
+              print(f"::error::Could not read config.json: {e}")
+              sys.exit(1)
+
+          missing = [k for k in required if not str(config.get(k) or "").strip()]
+          if missing:
+              print(f"::error::config.json is missing: {', '.join(missing)}. "
+                    f"Fill these in (see README.md) before the sync can run.")
+              sys.exit(1)
+          EOF
 
       - name: Set up Python
         uses: actions/setup-python@v5
