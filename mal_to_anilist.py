@@ -209,7 +209,7 @@ def anilist_request(payload, al_token, retries=3):
                 return None
     return None
 
-# ── FETCH MAL LIST ────────────────
+# ── FETCH MAL LIST ─────────────────────────────
 def fetch_mal_list(media_type, token):
     entries = []
     offset  = 0
@@ -255,7 +255,7 @@ def fetch_mal_list(media_type, token):
 
     return entries
 
-# ── ANILIST: GET ENTRY BY MAL ID ───────────────
+# ── ANILIST: GET ENTRY BY MAL ID ──────────────
 def get_anilist_entry(mal_id, media_type, al_token):
     al_type = "ANIME" if media_type == "anime" else "MANGA"
     query = """
@@ -290,7 +290,7 @@ def get_anilist_entry(mal_id, media_type, al_token):
     else:
         return al_id, None, 0, 0  # in DB, not on user list
 
-# ── ANILIST: UPDATE / ADD ENTRY ───────────
+# ── ANILIST: UPDATE / ADD ENTRY ─────
 def update_anilist_entry(al_id, status, progress, score, al_token):
     mutation = """
     mutation ($mediaId: Int, $status: MediaListStatus, $progress: Int, $score: Float) {
