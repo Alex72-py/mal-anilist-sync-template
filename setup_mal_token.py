@@ -12,11 +12,16 @@ STEP 2 (after you authorize in browser):
     Copy that full URL. Re-run this workflow, pasting the URL into the
     'mal_redirect_url' input. This script extracts the code, exchanges
     it for a token, and writes mal_token.json.
+
+Requires config.json (in this same directory) to already have a non-empty
+mal_client_id. Fill that in first — either by hand-editing config.json or
+by running the "Setup - Config" workflow.
 """
 
 import json
 import os
 import sys
+import time
 import requests
 
 BASE      = os.path.dirname(os.path.abspath(__file__))
@@ -29,35 +34,39 @@ TOK_F     = os.path.join(BASE, "mal_token.json")
 # two separate GitHub Actions runs.
 CODE_VERIFIER = "MalAniListSyncBotFixedVerifierString1234567890ABCDEFGHIJKLMNOPQ"
 
+
 def load_mal_client_id():
     if not os.path.exists(CONFIG_F):
         print(
-            "ERROR: config.json not found.\n"
-            "Create it from the template (see README.md) and fill in "
-            "mal_client_id — either by hand-editing config.json or by "
-            "running the 'Setup - Config' workflow first."
+            "ERROR: config.json not found.\n\n"
+            "Create it first — either hand-edit config.json in the repo, or run\n"
+            "the 'Setup - Config' workflow from the Actions tab — before running\n"
+            "MAL setup. See the README's 'Setup' section.\n"
         )
         sys.exit(1)
 
-    with open(CONFIG_F) as f:
-        try:
-            cfg = json.load(f)
-        except json.JSONDecodeError as e:
-            print(f"ERROR: config.json is not valid JSON: {e}")
-            sys.exit(1)
+    try:
+        with open(CONFIG_F, encoding="utf-8") as f:
+            config = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"ERROR: config.json exists but could not be read/parsed ({e}).")
+        sys.exit(1)
 
-    client_id = cfg.get("mal_client_id", "")
+    client_id = str(config.get("mal_client_id", "")).strip()
     if not client_id:
         print(
-            "ERROR: config.json has no mal_client_id set.\n"
-            "Fill it in either by hand-editing config.json or by running "
-            "the 'Setup - Config' workflow first (see README.md)."
+            "ERROR: config.json is missing 'mal_client_id'.\n\n"
+            "Register your own app at https://myanimelist.net/apiconfig and\n"
+            "put its Client ID into config.json (redirect URI must be exactly\n"
+            "http://localhost) before running this setup step.\n"
         )
         sys.exit(1)
 
     return client_id
 
+
 MAL_CLIENT_ID = load_mal_client_id()
+
 
 def step1_generate_url():
     auth_url = (
@@ -108,7 +117,6 @@ def step2_exchange_code(redirected_url):
         print(f"ERROR: {r.status_code} — {r.text}")
         sys.exit(1)
 
-    import time
     td = r.json()
     td["expires_at"] = time.time() + td.get("expires_in", 3600)
 

@@ -5,6 +5,10 @@ AniList OAuth Token Setup — run ONCE via GitHub Actions workflow_dispatch.
 STEP 1 (no input): prints the auth URL to visit.
 STEP 2 (after authorizing): re-run with 'anilist_redirect_url' input
         set to the full localhost URL you were redirected to.
+
+Requires config.json (in this same directory) to already have non-empty
+anilist_client_id and anilist_client_secret. Fill those in first — either
+by hand-editing config.json or by running the "Setup - Config" workflow.
 """
 
 import json
@@ -19,26 +23,26 @@ BASE     = os.path.dirname(os.path.abspath(__file__))
 CONFIG_F = os.path.join(BASE, "config.json")
 TOK_F    = os.path.join(BASE, "anilist_token.json")
 
+
 def load_anilist_credentials():
     if not os.path.exists(CONFIG_F):
         print(
-            "ERROR: config.json not found.\n"
-            "Create it from the template (see README.md) and fill in "
-            "anilist_client_id and anilist_client_secret — either by "
-            "hand-editing config.json or by running the 'Setup - Config' "
-            "workflow first."
+            "ERROR: config.json not found.\n\n"
+            "Create it first — either hand-edit config.json in the repo, or run\n"
+            "the 'Setup - Config' workflow from the Actions tab — before running\n"
+            "AniList setup. See the README's 'Setup' section.\n"
         )
         sys.exit(1)
 
-    with open(CONFIG_F) as f:
-        try:
-            cfg = json.load(f)
-        except json.JSONDecodeError as e:
-            print(f"ERROR: config.json is not valid JSON: {e}")
-            sys.exit(1)
+    try:
+        with open(CONFIG_F, encoding="utf-8") as f:
+            config = json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"ERROR: config.json exists but could not be read/parsed ({e}).")
+        sys.exit(1)
 
-    client_id     = cfg.get("anilist_client_id", "")
-    client_secret = cfg.get("anilist_client_secret", "")
+    client_id     = str(config.get("anilist_client_id", "")).strip()
+    client_secret = str(config.get("anilist_client_secret", "")).strip()
     missing = [
         name for name, val in
         [("anilist_client_id", client_id), ("anilist_client_secret", client_secret)]
@@ -46,15 +50,18 @@ def load_anilist_credentials():
     ]
     if missing:
         print(
-            "ERROR: config.json is missing values for: " + ", ".join(missing) + "\n"
-            "Fill these in either by hand-editing config.json or by running "
-            "the 'Setup - Config' workflow first (see README.md)."
+            "ERROR: config.json is missing: " + ", ".join(missing) + "\n\n"
+            "Register your own app at https://anilist.co/settings/developer and\n"
+            "put its Client ID and Client Secret into config.json (redirect URI\n"
+            "must be exactly http://localhost) before running this setup step.\n"
         )
         sys.exit(1)
 
     return client_id, client_secret
 
+
 ANILIST_CLIENT_ID, ANILIST_CLIENT_SECRET = load_anilist_credentials()
+
 
 def step1_generate_url():
     auth_url = (
