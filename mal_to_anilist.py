@@ -26,6 +26,7 @@ import sys
 import time
 import requests
 from datetime import datetime
+from math import floor
 
 BASE       = os.path.dirname(os.path.abspath(__file__))
 CONFIG_F   = os.path.join(BASE, "config.json")
@@ -144,6 +145,7 @@ MAL_TO_AL_STATUS = {
 
 AL_TO_MAL_STATUS = {
     "CURRENT": {"anime": "watching", "manga": "reading"},
+    "REPEATING": {"anime": "watching", "manga": "reading"},
     "COMPLETED": {"anime": "completed", "manga": "completed"},
     "PAUSED": {"anime": "on_hold", "manga": "on_hold"},
     "DROPPED": {"anime": "dropped", "manga": "dropped"},
@@ -332,7 +334,7 @@ def update_anilist_entry(al_id, status, progress, score, al_token):
 # ── MAL: UPDATE ENTRY ─────────────────────────────────────
 def mal_score(score):
     """Convert AniList POINT_10 scores to MAL's integer 0–10 score range."""
-    return max(0, min(10, round(float(score or 0))))
+    return max(0, min(10, floor(float(score or 0) + 0.5)))
 
 
 def update_mal_entry(mal_id, media_type, status, progress, score, mal_token):
@@ -346,20 +348,28 @@ def update_mal_entry(mal_id, media_type, status, progress, score, mal_token):
         log(f"  Unsupported AniList status for MAL update: {status}")
         return False
 
-    r = requests.put(
-        f"https://api.myanimelist.net/v2/{media_type}/{mal_id}/my_list_status",
-        data={
-            "status": mapped_status,
-            progress_field: progress,
-            "score": mal_score(score),
-        },
-        headers={
-            "Authorization":   f"Bearer {mal_token}",
-            "X-MAL-CLIENT-ID": MAL_CLIENT_ID,
-            "Content-Type":    "application/x-www-form-urlencoded",
-        },
-        timeout=15,
-    )
+    data = {
+        "status": mapped_status,
+        progress_field: progress,
+        "score": mal_score(score),
+    }
+    if status == "REPEATING":
+        data["is_rewatching" if media_type == "anime" else "is_rereading"] = "true"
+
+    try:
+        r = requests.put(
+            f"https://api.myanimelist.net/v2/{media_type}/{mal_id}/my_list_status",
+            data=data,
+            headers={
+                "Authorization":   f"Bearer {mal_token}",
+                "X-MAL-CLIENT-ID": MAL_CLIENT_ID,
+                "Content-Type":    "application/x-www-form-urlencoded",
+            },
+            timeout=15,
+        )
+    except requests.exceptions.RequestException as e:
+        log(f"  MAL update request failed: {e}")
+        return False
     if r.status_code != 200:
         log(f"  MAL update failed: {r.status_code} {r.text[:200]}")
         return False

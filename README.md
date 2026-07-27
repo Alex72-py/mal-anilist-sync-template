@@ -144,8 +144,15 @@ When MAL updates AniList, statuses are mapped like this:
 | `dropped` | `dropped` | `DROPPED` |
 | `plan_to_watch` | `plan_to_read` | `PLANNING` |
 
-When AniList updates MAL, the same mapping is reversed. AniList's `POINT_10`
-score is rounded to MAL's integer `0`–`10` score range.
+When AniList updates MAL, the same mapping is reversed. AniList `REPEATING`
+entries are sent to MAL as `watching`/`reading` with MAL's rewatching or
+rereading flag enabled.
+
+Score synchronization currently supports only the `0`–`10` rating scale.
+AniList scores are read as `POINT_10` values and rounded half-up to MAL's
+integer `0`–`10` range. Configure both AniList and MyAnimeList to use the
+same `0`–`10` rating scale if you want scores to sync predictably. Other
+AniList scoring formats are not supported by this template right now.
 
 ### Current limits
 
