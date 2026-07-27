@@ -2,9 +2,10 @@ name: MAL to AniList Sync
 
 on:
   schedule:
-    # Runs daily at 06:00 UTC. The script itself checks sync_interval_days
-    # (in config.json) and skips if it's not time yet — so this is just a
-    # "check-in" cadence, not the actual sync frequency.
+    # Runs every day at 06:00 UTC to check whether a sync is due.
+    # The script itself checks sync_interval_days (in config.json) and skips
+    # if it is not time yet — so this is a daily check-in cadence, not the
+    # actual sync frequency.
     - cron: '0 6 * * *'
   workflow_dispatch: {}   # allows manual trigger from the Actions tab
 

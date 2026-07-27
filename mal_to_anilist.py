@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 """
-MAL → AniList Sync Bot
-Reads your full anime + manga list from MAL and syncs to AniList.
+MAL ↔ AniList Sync Bot
+Reads your full anime + manga list from MAL and syncs matching entries both ways.
 
 Logic:
-  - MAL entry found in AniList DB + not on your AniList list → Add it
+  - MAL entry found in AniList DB + not on your AniList list → Add it to AniList
   - MAL entry not found in AniList DB at all                 → Skip
-  - AniList entry not in MAL                                 → Skip
-  - Both have it, AniList progress >= MAL                    → Skip
-  - Both have it, AniList progress < MAL                     → Update
-  - Same progress                                            → Skip
+  - Entry exists on both lists, AniList progress < MAL       → Update AniList
+  - Entry exists on both lists, AniList progress > MAL       → Update MAL
+  - Entry exists on both lists with the same progress        → Skip
 
-Runs via GitHub Actions on a schedule (see sync_interval_days in config.json).
+Because the script starts from your MAL list, AniList-only entries that are
+missing from MAL entirely are not imported into MAL.
+
+Runs via GitHub Actions daily as a check-in. The actual sync still respects
+sync_interval_days in config.json.
 
 All credentials come from config.json in this same directory. See README.md
 for how to fill it in (hand-edit it, or run the "Setup - Config" workflow).
@@ -23,6 +26,7 @@ import sys
 import time
 import requests
 from datetime import datetime
+from math import floor
 
 BASE       = os.path.dirname(os.path.abspath(__file__))
 CONFIG_F   = os.path.join(BASE, "config.json")
@@ -137,6 +141,15 @@ MAL_TO_AL_STATUS = {
     "dropped":       "DROPPED",
     "plan_to_watch": "PLANNING",
     "plan_to_read":  "PLANNING",
+}
+
+AL_TO_MAL_STATUS = {
+    "CURRENT": {"anime": "watching", "manga": "reading"},
+    "REPEATING": {"anime": "watching", "manga": "reading"},
+    "COMPLETED": {"anime": "completed", "manga": "completed"},
+    "PAUSED": {"anime": "on_hold", "manga": "on_hold"},
+    "DROPPED": {"anime": "dropped", "manga": "dropped"},
+    "PLANNING": {"anime": "plan_to_watch", "manga": "plan_to_read"},
 }
 
 # ── MAL TOKEN ─────────────────────────────────────────────
@@ -318,6 +331,50 @@ def update_anilist_entry(al_id, status, progress, score, al_token):
         return False
     return r.status_code == 200
 
+# ── MAL: UPDATE ENTRY ─────────────────────────────────────
+def mal_score(score):
+    """Convert AniList POINT_10 scores to MAL's integer 0–10 score range."""
+    return max(0, min(10, floor(float(score or 0) + 0.5)))
+
+
+def update_mal_entry(mal_id, media_type, status, progress, score, mal_token):
+    progress_field = (
+        "num_watched_episodes"
+        if media_type == "anime"
+        else "num_chapters_read"
+    )
+    mapped_status = AL_TO_MAL_STATUS.get(status, {}).get(media_type)
+    if mapped_status is None:
+        log(f"  Unsupported AniList status for MAL update: {status}")
+        return False
+
+    data = {
+        "status": mapped_status,
+        progress_field: progress,
+        "score": mal_score(score),
+    }
+    if status == "REPEATING":
+        data["is_rewatching" if media_type == "anime" else "is_rereading"] = "true"
+
+    try:
+        r = requests.put(
+            f"https://api.myanimelist.net/v2/{media_type}/{mal_id}/my_list_status",
+            data=data,
+            headers={
+                "Authorization":   f"Bearer {mal_token}",
+                "X-MAL-CLIENT-ID": MAL_CLIENT_ID,
+                "Content-Type":    "application/x-www-form-urlencoded",
+            },
+            timeout=15,
+        )
+    except requests.exceptions.RequestException as e:
+        log(f"  MAL update request failed: {e}")
+        return False
+    if r.status_code != 200:
+        log(f"  MAL update failed: {r.status_code} {r.text[:200]}")
+        return False
+    return True
+
 # ── MAIN ──────────────────────────────────────────────────
 def sync():
     days = days_since_last_run()
@@ -341,9 +398,10 @@ def sync():
     if not al_token:
         return
 
-    total_updated = 0
-    total_added   = 0
-    total_skipped = 0
+    total_anilist_updated = 0
+    total_mal_updated     = 0
+    total_added           = 0
+    total_skipped         = 0
 
     for media_type in ["anime", "manga"]:
         log(f"--- {media_type.upper()} ---")
@@ -383,9 +441,19 @@ def sync():
                 ok = update_anilist_entry(al_id, al_status, progress, score, al_token)
                 if ok:
                     log(f"  UPDATED: {title} — {my_al_progress}→{progress}, score {my_al_score}→{score}")
-                    total_updated += 1
+                    total_anilist_updated += 1
                 else:
-                    log(f"  FAILED to update: {title}")
+                    log(f"  FAILED to update AniList: {title}")
+                    total_skipped += 1
+
+            elif my_al_progress > progress:
+                # AniList ahead of MAL → Update MAL
+                ok = update_mal_entry(mal_id, media_type, my_al_status, my_al_progress, my_al_score, mal_token)
+                if ok:
+                    log(f"  UPDATED MAL: {title} — {progress}→{my_al_progress}, score {score}→{my_al_score}")
+                    total_mal_updated += 1
+                else:
+                    log(f"  FAILED to update MAL: {title}")
                     total_skipped += 1
 
             else:
@@ -394,7 +462,12 @@ def sync():
             time.sleep(1)
 
     mark_ran_today()
-    log(f"Done — Added: {total_added} | Updated: {total_updated} | Skipped: {total_skipped}")
+    log(
+        f"Done — Added: {total_added} | "
+        f"AniList updated: {total_anilist_updated} | "
+        f"MAL updated: {total_mal_updated} | "
+        f"Skipped: {total_skipped}"
+    )
     log("=" * 48)
 
 if __name__ == "__main__":

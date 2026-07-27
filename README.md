@@ -1,6 +1,6 @@
-# MAL → AniList Sync Bot (Template)
+# MAL ↔ AniList Sync Bot (Template)
 
-Syncs your MyAnimeList anime + manga list to AniList automatically.
+Syncs matching MyAnimeList and AniList anime + manga entries automatically.
 Runs entirely on GitHub Actions — no server, no phone, no local machine
 needed once it's set up.
 
@@ -105,27 +105,63 @@ Same two-pass dance, using **"Setup - AniList OAuth Token"** instead:
 
 ### Step 5 — Done
 
-From here on, **"MAL to AniList Sync"** runs automatically once a day
-(checking in, but only actually syncing every `sync_interval_days` days per
-your config). You can also trigger it manually any time from the Actions
-tab. Logs are appended to `anilist_sync_log.txt` in the repo after each run.
+From here on, **"MAL to AniList Sync"** runs automatically once a day at
+06:00 UTC. That daily workflow run is a **check-in**, not a forced sync every
+day: `mal_to_anilist.py` still checks `sync_interval_days` and exits without
+changing lists when the configured interval has not elapsed. You can also
+trigger it manually any time from the Actions tab. Logs are appended to
+`anilist_sync_log.txt` in the repo after each run.
+
+In the default configuration (`"sync_interval_days": 23`), GitHub Actions
+checks daily, but actual list updates happen at most once every 23 days
+unless you edit `config.json` or reset `anilist_last_run.txt`.
 
 ---
 
 ## How the sync works
 
-For each of your anime and manga lists on MAL, every entry is looked up on
-AniList by MAL ID:
+The bot uses MAL as the list it scans, then looks up each MAL anime or manga
+entry in AniList by MAL ID. For entries that exist on both services, the
+side with the higher progress wins:
 
-- Not found in AniList's database at all → skipped
-- Found in AniList's database, but not on your AniList list → **added**,
-  using MAL's status/progress/score
-- On both lists, and your AniList progress is behind MAL → **updated**
-- On both lists, and AniList is already caught up → left alone
+| Situation | What happens | Values copied |
+|---|---|---|
+| The MAL title is not found in AniList's database | Skipped | Nothing |
+| The MAL title exists in AniList's database but is not on your AniList list | Added to AniList | MAL status, progress, and score |
+| MAL progress is ahead of AniList | AniList is updated | MAL status, progress, and score |
+| AniList progress is ahead of MAL | MyAnimeList is updated | AniList status, progress, and score |
+| Progress is the same on both services | Left alone | Nothing |
 
-Status mapping: `watching`/`reading` → `CURRENT`, `completed` →
-`COMPLETED`, `on_hold` → `PAUSED`, `dropped` → `DROPPED`,
-`plan_to_watch`/`plan_to_read` → `PLANNING`.
+### Status and score mapping
+
+When MAL updates AniList, statuses are mapped like this:
+
+| MAL anime status | MAL manga status | AniList status |
+|---|---|---|
+| `watching` | `reading` | `CURRENT` |
+| `completed` | `completed` | `COMPLETED` |
+| `on_hold` | `on_hold` | `PAUSED` |
+| `dropped` | `dropped` | `DROPPED` |
+| `plan_to_watch` | `plan_to_read` | `PLANNING` |
+
+When AniList updates MAL, the same mapping is reversed. AniList `REPEATING`
+entries are sent to MAL as `watching`/`reading` with MAL's rewatching or
+rereading flag enabled.
+
+Score synchronization currently supports only the `0`–`10` rating scale.
+AniList scores are read as `POINT_10` values and rounded half-up to MAL's
+integer `0`–`10` range. Configure both AniList and MyAnimeList to use the
+same `0`–`10` rating scale if you want scores to sync predictably. Other
+AniList scoring formats are not supported by this template right now.
+
+### Current limits
+
+- The script scans your MAL list first. That means an entry that exists only
+  on AniList and is missing from MAL entirely is not imported into MAL.
+- Bidirectional updates apply when the same title already appears in the MAL
+  scan and can be matched to AniList by MAL ID.
+- Progress decides which side updates the other; if progress is equal, the
+  script intentionally does not overwrite status or score.
 
 ## Files
 
