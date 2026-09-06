@@ -25,7 +25,7 @@ import os
 import sys
 import time
 import requests
-from datetime import datetime
+from datetime import datetime, timedelta
 from math import floor
 
 BASE       = os.path.dirname(os.path.abspath(__file__))
@@ -88,9 +88,12 @@ def load_config():
         )
         sys.exit(1)
 
-    # sync_interval_days is optional-with-default, not part of the hard requirement
+    # sync_interval_days / log_retention_days are optional-with-default,
+    # not part of the hard requirement
     if "sync_interval_days" not in config:
         config["sync_interval_days"] = 23
+    if "log_retention_days" not in config:
+        config["log_retention_days"] = 120  # ~4 months
 
     return config
 
@@ -101,6 +104,7 @@ ANILIST_CLIENT_ID      = CONFIG["anilist_client_id"]
 ANILIST_CLIENT_SECRET  = CONFIG["anilist_client_secret"]
 MAL_USERNAME           = CONFIG["mal_username"]
 SYNC_INTERVAL_DAYS     = CONFIG["sync_interval_days"]
+LOG_RETENTION_DAYS     = CONFIG["log_retention_days"]
 
 
 def log(msg):
@@ -131,6 +135,37 @@ def already_ran_recently():
 def mark_ran_today():
     with open(LAST_RUN, "w") as f:
         f.write(datetime.now().strftime("%Y-%m-%d"))
+
+# ── LOG ROTATION ───────────────────────────────────────────
+def prune_old_logs(retention_days=None):
+    """Drop log lines older than retention_days, keeping the file bounded.
+    Lines without a parseable timestamp are kept as-is (safer than dropping)."""
+    if retention_days is None:
+        retention_days = LOG_RETENTION_DAYS
+    if not os.path.exists(LOG_F):
+        return
+    cutoff = datetime.now() - timedelta(days=retention_days)
+    kept = []
+    removed = 0
+    with open(LOG_F, "r", encoding="utf-8") as f:
+        for line in f:
+            ts_str = line[1:20] if line.startswith("[") and len(line) > 20 else None
+            keep = True
+            if ts_str:
+                try:
+                    line_ts = datetime.strptime(ts_str, "%Y-%m-%d %H:%M:%S")
+                    if line_ts < cutoff:
+                        keep = False
+                except ValueError:
+                    pass
+            if keep:
+                kept.append(line)
+            else:
+                removed += 1
+    if removed:
+        with open(LOG_F, "w", encoding="utf-8") as f:
+            f.writelines(kept)
+        print(f"[log-rotation] Removed {removed} log line(s) older than {retention_days} days.")
 
 # ── MAL STATUS → ANILIST STATUS ───────────────────────────
 MAL_TO_AL_STATUS = {
@@ -337,7 +372,7 @@ def mal_score(score):
     return max(0, min(10, floor(float(score or 0) + 0.5)))
 
 
-def update_mal_entry(mal_id, media_type, status, progress, score, mal_token):
+def update_mal_entry(mal_id, media_type, status, progress, score, mal_token, retries=3):
     progress_field = (
         "num_watched_episodes"
         if media_type == "anime"
@@ -370,6 +405,13 @@ def update_mal_entry(mal_id, media_type, status, progress, score, mal_token):
     except requests.exceptions.RequestException as e:
         log(f"  MAL update request failed: {e}")
         return False
+
+    if r.status_code == 429 and retries > 1:
+        wait = int(r.headers.get("Retry-After", 60))
+        log(f"  MAL rate limited — waiting {wait}s...")
+        time.sleep(wait)
+        return update_mal_entry(mal_id, media_type, status, progress, score, mal_token, retries - 1)
+
     if r.status_code != 200:
         log(f"  MAL update failed: {r.status_code} {r.text[:200]}")
         return False
@@ -381,6 +423,8 @@ def sync():
     if already_ran_recently():
         log(f"Last sync was {days} day(s) ago — interval is {SYNC_INTERVAL_DAYS} days. Skipping.")
         return
+
+    prune_old_logs()
 
     log("=" * 48)
     log("MAL → AniList sync started")
@@ -402,6 +446,20 @@ def sync():
     total_mal_updated     = 0
     total_added           = 0
     total_skipped         = 0
+    # Only entries worth a human's attention go here (failures/errors).
+    # Routine "same progress" skips are just counted, not itemized —
+    # on a mature list that's most entries every run and adds nothing to read.
+    notable_skips = []
+
+    def record_skip(media_type, title, reason, notable=False):
+        nonlocal total_skipped
+        total_skipped += 1
+        if notable:
+            notable_skips.append({
+                "type": media_type,
+                "title": title,
+                "reason": reason,
+            })
 
     for media_type in ["anime", "manga"]:
         log(f"--- {media_type.upper()} ---")
@@ -420,8 +478,8 @@ def sync():
             time.sleep(1)  # stay well within AniList rate limit
 
             if result is None:
-                log(f"  SKIP (not in AniList DB): {title}")
-                total_skipped += 1
+                reason = "not found in AniList DB"
+                record_skip(media_type, title, reason)
                 continue
 
             al_id, my_al_status, my_al_progress, my_al_score = result
@@ -433,8 +491,9 @@ def sync():
                     log(f"  ADDED: {title} — {al_status}, progress {progress}, score {score}")
                     total_added += 1
                 else:
+                    reason = "failed to add to AniList"
                     log(f"  FAILED to add: {title}")
-                    total_skipped += 1
+                    record_skip(media_type, title, reason, notable=True)
 
             elif my_al_progress < progress:
                 # AniList behind MAL → Update
@@ -443,8 +502,9 @@ def sync():
                     log(f"  UPDATED: {title} — {my_al_progress}→{progress}, score {my_al_score}→{score}")
                     total_anilist_updated += 1
                 else:
+                    reason = "failed to update AniList"
                     log(f"  FAILED to update AniList: {title}")
-                    total_skipped += 1
+                    record_skip(media_type, title, reason, notable=True)
 
             elif my_al_progress > progress:
                 # AniList ahead of MAL → Update MAL
@@ -453,11 +513,13 @@ def sync():
                     log(f"  UPDATED MAL: {title} — {progress}→{my_al_progress}, score {score}→{my_al_score}")
                     total_mal_updated += 1
                 else:
+                    reason = "failed to update MAL"
                     log(f"  FAILED to update MAL: {title}")
-                    total_skipped += 1
+                    record_skip(media_type, title, reason, notable=True)
 
             else:
-                log(f"  OK: {title}")
+                # Same progress — routine, don't log per-entry
+                record_skip(media_type, title, f"same progress ({progress})")
 
             time.sleep(1)
 
@@ -468,6 +530,12 @@ def sync():
         f"MAL updated: {total_mal_updated} | "
         f"Skipped: {total_skipped}"
     )
+    if notable_skips:
+        log(f"Notable skips ({len(notable_skips)} needing attention):")
+        for skipped in notable_skips:
+            log(f"  - [{skipped['type']}] {skipped['title']} — {skipped['reason']}")
+    else:
+        log("Notable skips: none (all skips were routine/no-change entries)")
     log("=" * 48)
 
 if __name__ == "__main__":
