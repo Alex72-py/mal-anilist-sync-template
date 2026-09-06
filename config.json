@@ -3,5 +3,6 @@
   "anilist_client_id": "",
   "anilist_client_secret": "",
   "mal_username": "",
-  "sync_interval_days": 23
+  "sync_interval_days": 23,
+  "log_retention_days": 120
 }
